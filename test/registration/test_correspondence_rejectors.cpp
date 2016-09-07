@@ -45,6 +45,7 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/registration/correspondence_rejection_median_distance.h>
 #include <pcl/registration/correspondence_rejection_poly.h>
+#include <pcl/registration/correspondence_rejection_sample_consensus.h>
 
 #include <boost/random.hpp>
 
@@ -150,6 +151,36 @@ TEST (CorrespondenceRejectors, CorrespondenceRejectionPoly)
   EXPECT_NEAR(recall, 1.0, 0.2);
 }
 
+TEST (CorrespondenceRejectors, NotUniqueQueries)
+{
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+  cloud->width = 20;
+  cloud->height = 1;
+  cloud->points.resize (cloud->width * cloud->height);
+
+  pcl::Correspondences input_corrs;
+  for (size_t idx = 0; idx < cloud->points.size (); ++idx)
+  {
+    cloud->points[idx].x = idx;
+    cloud->points[idx].y = idx;
+    cloud->points[idx].z = idx;
+
+    input_corrs.push_back(pcl::Correspondence (idx, idx, 0));
+  }
+  input_corrs.back().index_query = input_corrs.front().index_query;
+
+  pcl::Correspondences filtered_corrs;
+  pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> corr_rejector;
+  corr_rejector.setMaximumIterations (100);
+  corr_rejector.setInlierThreshold (.01);
+  corr_rejector.setInputSource (cloud);
+  corr_rejector.setInputTarget (cloud);
+
+  corr_rejector.getRemainingCorrespondences (input_corrs, filtered_corrs);
+
+  for (size_t idx = 0; idx < filtered_corrs.size(); ++idx)
+    EXPECT_EQ(filtered_corrs[idx].index_query, filtered_corrs[idx].index_match);
+}
 
 /* ---[ */
 int

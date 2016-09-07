@@ -151,19 +151,16 @@ pcl::registration::CorrespondenceRejectorSampleConsensus<PointT>::getRemainingCo
          best_transformation_.setIdentity ();
          return;
        }
-       boost::unordered_map<int, int> index_to_correspondence;
-       for (int i = 0; i < nr_correspondences; ++i)
-         index_to_correspondence[original_correspondences[i].index_query] = i;
 
        remaining_correspondences.resize (inliers.size ());
        for (size_t i = 0; i < inliers.size (); ++i)
-         remaining_correspondences[i] = original_correspondences[index_to_correspondence[inliers[i]]];
+         remaining_correspondences[i] = original_correspondences[inliers[i]];
 
        if (save_inliers_)
        {
          inlier_indices_.reserve (inliers.size ());
          for (size_t i = 0; i < inliers.size (); ++i)
-           inlier_indices_.push_back (index_to_correspondence[inliers[i]]);
+           inlier_indices_.push_back (inliers[i]);
        }
 
        // get best transformation

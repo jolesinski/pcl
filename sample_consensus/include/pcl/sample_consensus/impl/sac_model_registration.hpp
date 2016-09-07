@@ -47,15 +47,52 @@
 #include <pcl/point_types.h>
 
 //////////////////////////////////////////////////////////////////////////
+template <typename PointT> void
+pcl::SampleConsensusModelRegistration<PointT>::getSamples (int &iterations, std::vector<int> &samples)
+{
+  // We're assuming that indices_ have already been set in the constructor
+  if (indices_->size () < this->getSampleSize ())
+  {
+    PCL_ERROR ("[pcl::SampleConsensusModel::getSamples] Can not select %lu unique points out of %lu!\n",
+               samples.size (), indices_->size ());
+    // one of these will make it stop :)
+    samples.clear ();
+    iterations = INT_MAX - 1;
+    return;
+  }
+
+  // Get a second point which is different than the first
+  samples.resize (this->getSampleSize ());
+  for (unsigned int iter = 0; iter < max_sample_checks_; ++iter)
+  {
+    // Choose the random indices
+    for (int i = 0; i < this->getSampleSize (); ++i)
+      // The 1/(RAND_MAX+1.0) trick is when the random numbers are not uniformly distributed and for small modulo
+      // elements, that does not matter (and nowadays, random number generators are good)
+      samples[i] = i + (this->rnd () % (static_cast<int>(indices_->size()) - i));
+
+    // If it's a good sample, stop here
+    if (isSampleGood (samples))
+    {
+      PCL_DEBUG ("[pcl::SampleConsensusModel::getSamples] Selected %lu samples.\n", samples.size ());
+      return;
+    }
+  }
+  PCL_DEBUG ("[pcl::SampleConsensusModel::getSamples] WARNING: Could not select %d sample points"
+                 "in %d iterations!\n", this->getSampleSize (), max_sample_checks_);
+  samples.clear ();
+}
+
+//////////////////////////////////////////////////////////////////////////
 template <typename PointT> bool
 pcl::SampleConsensusModelRegistration<PointT>::isSampleGood (const std::vector<int> &samples) const
 {
   using namespace pcl::common;
   using namespace pcl::traits;
 
-  PointT p10 = input_->points[samples[1]] - input_->points[samples[0]];
-  PointT p20 = input_->points[samples[2]] - input_->points[samples[0]];
-  PointT p21 = input_->points[samples[2]] - input_->points[samples[1]];
+  PointT p10 = input_->points[(*indices_)[samples[1]]] - input_->points[(*indices_)[samples[0]]];
+  PointT p20 = input_->points[(*indices_)[samples[2]]] - input_->points[(*indices_)[samples[0]]];
+  PointT p21 = input_->points[(*indices_)[samples[2]]] - input_->points[(*indices_)[samples[1]]];
 
   return ((p10.x * p10.x + p10.y * p10.y + p10.z * p10.z) > sample_dist_thresh_ && 
           (p20.x * p20.x + p20.y * p20.y + p20.z * p20.z) > sample_dist_thresh_ && 
@@ -64,7 +101,8 @@ pcl::SampleConsensusModelRegistration<PointT>::isSampleGood (const std::vector<i
 
 //////////////////////////////////////////////////////////////////////////
 template <typename PointT> bool
-pcl::SampleConsensusModelRegistration<PointT>::computeModelCoefficients (const std::vector<int> &samples, Eigen::VectorXf &model_coefficients)
+pcl::SampleConsensusModelRegistration<PointT>::computeModelCoefficients (
+    const std::vector<int> &samples, Eigen::VectorXf &model_coefficients)
 {
   if (!target_)
   {
@@ -75,21 +113,27 @@ pcl::SampleConsensusModelRegistration<PointT>::computeModelCoefficients (const s
   if (samples.size () != 3)
     return (false);
 
+  std::vector<int> indices_src (3);
   std::vector<int> indices_tgt (3);
   for (int i = 0; i < 3; ++i)
-    indices_tgt[i] = correspondences_[samples[i]];
+  {
+    indices_src[i] = (*indices_)[samples[i]];
+    indices_tgt[i] = (*indices_tgt_)[samples[i]];
+  }
 
-  estimateRigidTransformationSVD (*input_, samples, *target_, indices_tgt, model_coefficients);
+  estimateRigidTransformationSVD (*input_, indices_src, *target_, indices_tgt, model_coefficients);
   return (true);
 }
 
 //////////////////////////////////////////////////////////////////////////
 template <typename PointT> void
-pcl::SampleConsensusModelRegistration<PointT>::getDistancesToModel (const Eigen::VectorXf &model_coefficients, std::vector<double> &distances) 
+pcl::SampleConsensusModelRegistration<PointT>::getDistancesToModel (
+    const Eigen::VectorXf &model_coefficients, std::vector<double> &distances)
 {
   if (indices_->size () != indices_tgt_->size ())
   {
-    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::getDistancesToModel] Number of source indices (%lu) differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
+    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::getDistancesToModel] Number of source indices (%lu)"
+                   "differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
     distances.clear ();
     return;
   }
@@ -131,11 +175,13 @@ pcl::SampleConsensusModelRegistration<PointT>::getDistancesToModel (const Eigen:
 
 //////////////////////////////////////////////////////////////////////////
 template <typename PointT> void
-pcl::SampleConsensusModelRegistration<PointT>::selectWithinDistance (const Eigen::VectorXf &model_coefficients, const double threshold, std::vector<int> &inliers) 
+pcl::SampleConsensusModelRegistration<PointT>::selectWithinDistance (
+    const Eigen::VectorXf &model_coefficients, const double threshold, std::vector<int> &inliers)
 {
   if (indices_->size () != indices_tgt_->size ())
   {
-    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::selectWithinDistance] Number of source indices (%lu) differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
+    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::selectWithinDistance] Number of source indices (%lu)"
+                   "differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
     inliers.clear ();
     return;
   }
@@ -175,11 +221,11 @@ pcl::SampleConsensusModelRegistration<PointT>::selectWithinDistance (const Eigen
 
     Eigen::Vector4f p_tr (transform * pt_src);
   
-    float distance = (p_tr - pt_tgt).squaredNorm (); 
+    float distance = (p_tr - pt_tgt).squaredNorm ();
     // Calculate the distance from the transformed point to its correspondence
     if (distance < thresh)
     {
-      inliers[nr_p] = (*indices_)[i];
+      inliers[nr_p] = i;
       error_sqr_dists_[nr_p] = static_cast<double> (distance);
       ++nr_p;
     }
@@ -195,7 +241,8 @@ pcl::SampleConsensusModelRegistration<PointT>::countWithinDistance (
 {
   if (indices_->size () != indices_tgt_->size ())
   {
-    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::countWithinDistance] Number of source indices (%lu) differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
+    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::countWithinDistance] Number of source indices (%lu)"
+                   "differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
     return (0);
   }
   if (!target_)
@@ -236,11 +283,13 @@ pcl::SampleConsensusModelRegistration<PointT>::countWithinDistance (
 
 //////////////////////////////////////////////////////////////////////////
 template <typename PointT> void
-pcl::SampleConsensusModelRegistration<PointT>::optimizeModelCoefficients (const std::vector<int> &inliers, const Eigen::VectorXf &model_coefficients, Eigen::VectorXf &optimized_coefficients) 
+pcl::SampleConsensusModelRegistration<PointT>::optimizeModelCoefficients (
+    const std::vector<int> &inliers, const Eigen::VectorXf &model_coefficients, Eigen::VectorXf &optimized_coefficients)
 {
   if (indices_->size () != indices_tgt_->size ())
   {
-    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::optimizeModelCoefficients] Number of source indices (%lu) differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
+    PCL_ERROR ("[pcl::SampleConsensusModelRegistration::optimizeModelCoefficients] Number of source indices (%lu)"
+                   "differs than number of target indices (%lu)!\n", indices_->size (), indices_tgt_->size ());
     optimized_coefficients = model_coefficients;
     return;
   }
@@ -256,8 +305,8 @@ pcl::SampleConsensusModelRegistration<PointT>::optimizeModelCoefficients (const 
   std::vector<int> indices_tgt (inliers.size ());
   for (size_t i = 0; i < inliers.size (); ++i)
   {
-    indices_src[i] = inliers[i];
-    indices_tgt[i] = correspondences_[indices_src[i]];
+    indices_src[i] = (*indices_)[inliers[i]];
+    indices_tgt[i] = (*indices_tgt_)[inliers[i]];
   }
 
   estimateRigidTransformationSVD (*input_, indices_src, *target_, indices_tgt, optimized_coefficients);

@@ -62,7 +62,9 @@ namespace pcl
       using SampleConsensusModel<PointT>::input_;
       using SampleConsensusModel<PointT>::indices_;
       using SampleConsensusModel<PointT>::error_sqr_dists_;
+      using SampleConsensusModel<PointT>::max_sample_checks_;
       using SampleConsensusModel<PointT>::isModelValid;
+      using SampleConsensusModel<PointT>::getSamples;
 
       typedef typename SampleConsensusModel<PointT>::PointCloud PointCloud;
       typedef typename SampleConsensusModel<PointT>::PointCloudPtr PointCloudPtr;
@@ -79,7 +81,6 @@ namespace pcl
         : SampleConsensusModel<PointT> (cloud, random)
         , target_ ()
         , indices_tgt_ ()
-        , correspondences_ ()
         , sample_dist_thresh_ (0)
       {
         // Call our own setInputCloud
@@ -100,10 +101,8 @@ namespace pcl
         : SampleConsensusModel<PointT> (cloud, indices, random)
         , target_ ()
         , indices_tgt_ ()
-        , correspondences_ ()
         , sample_dist_thresh_ (0)
       {
-        computeOriginalIndexMapping ();
         computeSampleDistanceThreshold (cloud, indices);
         model_name_ = "SampleConsensusModelRegistration";
         sample_size_ = 3;
@@ -113,6 +112,14 @@ namespace pcl
       /** \brief Empty destructor */
       virtual ~SampleConsensusModelRegistration () {}
 
+      /** \brief Get a set of random data samples and return them as point
+        * indices.
+        * \param[out] iterations the internal number of iterations used by SAC methods
+        * \param[out] samples the resultant model samples
+        */
+      virtual void
+      getSamples (int &iterations, std::vector<int> &samples);
+
       /** \brief Provide a pointer to the input dataset
         * \param[in] cloud the const boost shared pointer to a PointCloud message
         */
@@ -120,7 +127,6 @@ namespace pcl
       setInputCloud (const PointCloudConstPtr &cloud)
       {
         SampleConsensusModel<PointT>::setInputCloud (cloud);
-        computeOriginalIndexMapping ();
         computeSampleDistanceThreshold (cloud);
       }
 
@@ -138,7 +144,6 @@ namespace pcl
 
         for (int i = 0; i < target_size; ++i)
           (*indices_tgt_)[i] = i;
-        computeOriginalIndexMapping ();
       }
 
       /** \brief Set the input point cloud target.
@@ -150,7 +155,6 @@ namespace pcl
       {
         target_ = target;
         indices_tgt_.reset (new std::vector<int> (indices_tgt));
-        computeOriginalIndexMapping ();
       }
 
       /** \brief Compute a 4x4 rigid transformation matrix from the samples given
@@ -304,24 +308,11 @@ namespace pcl
                                       const std::vector<int> &indices_tgt,
                                       Eigen::VectorXf &transform);
 
-      /** \brief Compute mappings between original indices of the input_/target_ clouds. */
-      void
-      computeOriginalIndexMapping ()
-      {
-        if (!indices_tgt_ || !indices_ || indices_->empty () || indices_->size () != indices_tgt_->size ())
-          return;
-        for (size_t i = 0; i < indices_->size (); ++i)
-          correspondences_[(*indices_)[i]] = (*indices_tgt_)[i];
-      }
-
       /** \brief A boost shared pointer to the target point cloud data array. */
       PointCloudConstPtr target_;
 
       /** \brief A pointer to the vector of target point indices to use. */
       boost::shared_ptr <std::vector<int> > indices_tgt_;
-
-      /** \brief Given the index in the original point cloud, give the matching original index in the target cloud */
-      std::map<int, int> correspondences_;
 
       /** \brief Internal distance threshold used for the sample selection step. */
       double sample_dist_thresh_;
